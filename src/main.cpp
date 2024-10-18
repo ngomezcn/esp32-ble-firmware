@@ -35,6 +35,7 @@ LedState currentLedState = OFF; // Estado inicial del LED
 // Variables globales
 BLEServer *pServer = nullptr;
 BLECharacteristic *pCharacteristic = nullptr;
+BLEAdvertising *pAdvertising = nullptr; // Mover la declaración aquí
 bool deviceConnected = false;
 bool ledState = false;
 
@@ -50,11 +51,15 @@ public:
     deviceConnected = true;
     previousMillis = 0;   // Reiniciar el tiempo
     sendLEDState();       // Enviar el estado del LED al cliente al conectar
+
+    // Reiniciar la publicidad
+    pAdvertising->start(); // Reiniciar la publicidad al conectar
   }
 
   void onDisconnect(BLEServer *pServer)
   {
     deviceConnected = false;
+    pAdvertising->start(); // Reiniciar la publicidad al desconectar
   }
 };
 
@@ -80,14 +85,15 @@ void setup()
   pinMode(statusLedPin, OUTPUT);
   pinMode(gateRelayPin, OUTPUT);
 
+  /* TEMPORALMENT DESACTIVADO 
+  pinMode(32, OUTPUT);
+  pinMode(26, OUTPUT);
+  digitalWrite(32, HIGH);
+  digitalWrite(26, HIGH);
+  */
+
   digitalWrite(statusLedPin, LOW);
   digitalWrite(gateRelayPin, LOW);
-
-  //pinMode(32, OUTPUT);
-  //pinMode(26, OUTPUT);
-  //digitalWrite(32, HIGH);
-  //digitalWrite(26, HIGH);
-
 
   // Inicializar BLE
   BLEDevice::init(DEVICE_NAME);
@@ -105,8 +111,8 @@ void setup()
   // Iniciar el servicio
   pService->start();
 
-  // Configurar la publicidad BLE
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  // Inicializar la publicidad BLE
+  pAdvertising = BLEDevice::getAdvertising(); // Inicializa el objeto pAdvertising
   pAdvertising->addServiceUUID(SERVICE_UUID); // Añadir el UUID del servicio
   pAdvertising->setScanResponse(false);
   pAdvertising->setMinInterval(100);
@@ -167,8 +173,6 @@ void loop()
 {
   if (deviceConnected)
   {
-    Serial.print("Conectado");
-
     if (pCharacteristic->getValue().length() > 0)
     {
       String value = pCharacteristic->getValue().c_str();
