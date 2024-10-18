@@ -83,6 +83,12 @@ void setup()
   digitalWrite(statusLedPin, LOW);
   digitalWrite(gateRelayPin, LOW);
 
+  //pinMode(32, OUTPUT);
+  //pinMode(26, OUTPUT);
+  //digitalWrite(32, HIGH);
+  //digitalWrite(26, HIGH);
+
+
   // Inicializar BLE
   BLEDevice::init(DEVICE_NAME);
   pServer = BLEDevice::createServer();
