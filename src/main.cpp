@@ -1,208 +1,92 @@
 #include <Arduino.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <WiFi.h> // Asegúrate de incluir esta biblioteca
+#include "esp_system.h"   // Library for system information
+#include "esp_bt.h"       // Library to handle Bluetooth
 
-// Define el nombre del dispositivo BLE
-#define DEVICE_NAME "GUAT"
-
-// Define el UUID del servicio y la característica
-#define SERVICE_UUID "4c491e6a-38df-4d0f-b04b-8704a40071ce"
-#define CHARACTERISTIC_UUID "b0726341-e52e-471b-9cd6-4061e54616cc"
-
-const int statusLedPin = 2;
-const int gateRelayPin = 5;
-
-String commandBuffer = "";
-
-// Variables para el parpadeo del LED de estado
-unsigned long previousMillis = 0;
-
-const long offInterval = 4000; // 4 segundos (parpadeo normal)
-const long onInterval = 1000;  // 1 segundo (parpadeo normal)
-
-const long rapidOffInterval = 200; // 0.2 segundos (parpadeo rápido)
-const long rapidOnInterval = 200;  // 0.2 segundos (parpadeo rápido)
-
-enum LedState
-{
-  OFF,
-  ON
-};
-LedState currentLedState = OFF; // Estado inicial del LED
-
-// Variables globales
-BLEServer *pServer = nullptr;
-BLECharacteristic *pCharacteristic = nullptr;
-BLEAdvertising *pAdvertising = nullptr; // Mover la declaración aquí
-bool deviceConnected = false;
-bool ledState = false;
-
-// Declarar la función sendLEDState antes de la clase
-void sendLEDState();
-
-// Clase para manejar conexiones del cliente
-class MyServerCallbacks : public BLEServerCallbacks
-{
-public:
-  void onConnect(BLEServer *pServer)
-  {
-    deviceConnected = true;
-    previousMillis = 0;   // Reiniciar el tiempo
-    sendLEDState();       // Enviar el estado del LED al cliente al conectar
-
-    // Reiniciar la publicidad
-    pAdvertising->start(); // Reiniciar la publicidad al conectar
-  }
-
-  void onDisconnect(BLEServer *pServer)
-  {
-    deviceConnected = false;
-    pAdvertising->start(); // Reiniciar la publicidad al desconectar
-  }
+// Structure to store all relevant device information
+struct DeviceInfo {
+  String chipVersion;      // ESP32 chip version
+  String macBluetooth;     // Bluetooth MAC address
+  String chipID;           // Unique chip ID
+  int cpuFreqMHz;          // CPU frequency in MHz
+  int flashSize;           // Flash memory size in bytes
+  size_t freeRAM;          // Amount of free RAM in bytes
+  long uptime;             // Time since the device was powered on (in milliseconds)
 };
 
-// Función para enviar el estado del LED al cliente
-void sendLEDState()
-{
-  if (deviceConnected)
-  {
-    String state = ledState ? "ENCENDIDO" : "APAGADO";
-    pCharacteristic->setValue(state.c_str()); // Configura el valor de la característica
-    pCharacteristic->notify();                // Envía la notificación al cliente
-    Serial.print("Estado del LED enviado: ");
-    Serial.println(state);
-  }
-}
+DeviceInfo info;
 
-void setup()
-{
-  // Inicializar el puerto serie
+void sendDeviceInfo();
+void listenForCommands();
+
+void setup() {
+  // Start serial communication
   Serial.begin(115200);
 
-  // Inicializar el pin del LED
-  pinMode(statusLedPin, OUTPUT);
-  pinMode(gateRelayPin, OUTPUT);
+  // Retrieve ESP32 chip version
+  info.chipVersion = String(esp_get_idf_version());
 
-  /* TEMPORALMENT DESACTIVADO 
-  pinMode(32, OUTPUT);
-  pinMode(26, OUTPUT);
-  digitalWrite(32, HIGH);
-  digitalWrite(26, HIGH);
-  */
+  // Get Bluetooth MAC address
+  uint8_t btMac[6]; 
+  esp_read_mac(btMac, ESP_MAC_BT);
+  info.macBluetooth = String(btMac[0], HEX) + ":" + String(btMac[1], HEX) + ":" +
+                      String(btMac[2], HEX) + ":" + String(btMac[3], HEX) + ":" +
+                      String(btMac[4], HEX) + ":" + String(btMac[5], HEX);
 
-  digitalWrite(statusLedPin, LOW);
-  digitalWrite(gateRelayPin, LOW);
+  // Get WiFi MAC address (even without connection)
+  uint8_t wifiMac[6];
+  esp_read_mac(wifiMac, ESP_MAC_WIFI_STA);  // Read the WiFi MAC address
 
-  // Inicializar BLE
-  BLEDevice::init(DEVICE_NAME);
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
+  // Get unique chip ID
+  uint64_t chipid = ESP.getEfuseMac();  // Unique chip ID based on MAC
+  info.chipID = String((uint16_t)(chipid >> 32), HEX) + String((uint32_t)chipid, HEX);
 
-  // Crear un servicio BLE
-  BLEService *pService = pServer->createService(SERVICE_UUID);
+  // Get CPU frequency
+  info.cpuFreqMHz = getCpuFrequencyMhz();
 
-  // Crear una característica BLE
-  pCharacteristic = pService->createCharacteristic(
-      CHARACTERISTIC_UUID,
-      BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY); // Agregar propiedad de notificación
+  // Get Flash memory size
+  info.flashSize = ESP.getFlashChipSize();
 
-  // Iniciar el servicio
-  pService->start();
+  // Get the amount of free RAM
+  info.freeRAM = esp_get_free_heap_size();
 
-  // Inicializar la publicidad BLE
-  pAdvertising = BLEDevice::getAdvertising(); // Inicializa el objeto pAdvertising
-  pAdvertising->addServiceUUID(SERVICE_UUID); // Añadir el UUID del servicio
-  pAdvertising->setScanResponse(false);
-  pAdvertising->setMinInterval(100);
-  pAdvertising->setMaxInterval(200);
-  pAdvertising->setAdvertisementType(ADV_TYPE_IND);
+  // Get the uptime (time since power-on)
+  info.uptime = millis();
 
-  // Iniciar el advertising
-  pAdvertising->start();
-
-  // Mostrar la dirección MAC en el puerto serie
-  Serial.print("\n\nDirección MAC: ");
-  Serial.println(WiFi.macAddress()); // Mostrar la dirección MAC
-
-  Serial.println("Advertising started...");
+  sendDeviceInfo();
 }
 
-void blinkStatusLedPeriodically()
-{
-  unsigned long currentMillis = millis();
-
-  // Cambiar el estado del LED dependiendo de la conexión
-  if (deviceConnected)
-  {
-    // Parpadeo rápido
-    if (currentLedState == OFF && currentMillis - previousMillis >= rapidOffInterval)
-    {
-      previousMillis = currentMillis;
-      currentLedState = ON;
-      digitalWrite(statusLedPin, HIGH); // Encender LED
-    }
-    else if (currentLedState == ON && currentMillis - previousMillis >= rapidOnInterval)
-    {
-      previousMillis = currentMillis;
-      currentLedState = OFF;
-      digitalWrite(statusLedPin, LOW); // Apagar LED
-    }
-  }
-  else
-  {
-    // Si no está conectado, asegúrate de que el LED esté apagado
-    // Parpadeo normal
-    if (currentLedState == OFF && currentMillis - previousMillis >= offInterval)
-    {
-      previousMillis = currentMillis;
-      currentLedState = ON;
-      digitalWrite(statusLedPin, HIGH); // Encender LED
-    }
-    else if (currentLedState == ON && currentMillis - previousMillis >= onInterval)
-    {
-      previousMillis = currentMillis;
-      currentLedState = OFF;
-      digitalWrite(statusLedPin, LOW); // Apagar LED
-    }
-  }
+void loop() {
+  listenForCommands(); // Listen for commands from the Serial Monitor
 }
 
-void loop()
-{
-  if (deviceConnected)
-  {
-    if (pCharacteristic->getValue().length() > 0)
-    {
-      String value = pCharacteristic->getValue().c_str();
-      Serial.print("Valor recibido: ");
-      Serial.println(value);
+// Function to send device information in a CSV format
+void sendDeviceInfo() {
+  Serial.print("DEVICE_INFO,"); // Identifier
+  Serial.print("chipVersion:"); 
+  Serial.print(info.chipVersion);
+  Serial.print(",macBluetooth:"); 
+  Serial.print(info.macBluetooth);
+  Serial.print(",chipID:"); 
+  Serial.print(info.chipID);
+  Serial.print(",cpuFreqMHz:"); 
+  Serial.print(info.cpuFreqMHz);
+  Serial.print(",flashSizeKB:"); 
+  Serial.print(info.flashSize / 1024);  // Convert to KB
+  Serial.print(",freeRAMKB:"); 
+  Serial.print(info.freeRAM / 1024);  // Convert to KB
+  Serial.print(",uptimeSeconds:"); 
+  Serial.println(info.uptime / 1000);  // Convert to seconds
+}
 
-      // Comprobar el código recibido
-      if (value == "ENCENDER" && !ledState)
-      {                                   // Cambia solo si el LED está apagado
-        digitalWrite(gateRelayPin, HIGH); // Encender LED
-        ledState = true;
-        Serial.println("LED encendido.");
-        sendLEDState(); // Enviar el estado del LED después de encenderlo
-      }
-      else if (value == "APAGAR" && ledState)
-      {                                  // Cambia solo si el LED está encendido
-        digitalWrite(gateRelayPin, LOW); // Apagar LED
-        ledState = false;
-        Serial.println("LED apagado.");
-        sendLEDState(); // Enviar el estado del LED después de apagarlo
-      }
+// Function to listen for commands from the Serial Monitor
+void listenForCommands() {
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n');
+    command.trim(); // Remove any leading/trailing whitespace
 
-      // Limpiar el valor después de procesarlo
-      pCharacteristic->setValue(""); // Reiniciar valor
+    // If the command is "get_info", send the device info
+    if (command.equalsIgnoreCase("get_info()")) {
+      sendDeviceInfo();
     }
   }
-
-  // Llamar a la función de parpadeo del LED
-  blinkStatusLedPeriodically();
-
-  // Evitar que el loop consuma mucha CPU
-  delay(10); // Un pequeño delay para evitar un uso excesivo de la CPU
 }
