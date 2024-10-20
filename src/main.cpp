@@ -61,7 +61,7 @@ void loop() {
 
 // Function to send device information in a CSV format
 void sendDeviceInfo() {
-  Serial.print("DEVICE_INFO,"); // Identifier
+  Serial.print("DEVICEE_INFO,"); // Identifier
   Serial.print("chipVersion:"); 
   Serial.print(info.chipVersion);
   Serial.print(",macBluetooth:"); 
